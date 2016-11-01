@@ -1,0 +1,91 @@
+#!/usr/bin/env python
+
+"""JavBuz.com Service Code"""
+
+####################################################################################################
+def MetadataObjectForURL(url):
+    html = HTML.ElementFromURL(url)
+
+    time_stamp = int(Datetime.TimestampFromDatetime(Datetime.Now()))
+    thumb = html.xpath('//meta[@property="og:image"]/@content')[0]
+    art = '/:/plugins/com.plexapp.plugins.javhihi/resources/art-default.jpg?t=%s' %time_stamp
+
+    likes = html.xpath('//span[starts-with(@class, "like-count-movie")]/text()')[0].strip()
+    views = html.xpath('//div[@class="movie-view"]/button/text()')[0].strip()
+    tagline = 'Likes: %s | Views: %s' %(likes, views)
+
+    for md in html.xpath('//div[@class="box movie-detail"]'):
+        title = md.xpath('./h1/text()')[0].strip()
+
+        p0 = md.xpath('./p')[0].text_content().strip()
+        date = Regex('Release Date\:\ (.*)\,').search(p0).group(1)
+        dur = Regex('Duration\:\ (\d+)(.+)').search(p0)
+        duration = int(dur.group(1).strip()) * (60000 if 'min' in dur.group(2) else 3600000)
+
+        summary = md.xpath('./p')[1].text_content().strip()
+        genres = md.xpath('//ul[@class="links links-categories"]/li/a/text()')
+        tags = md.xpath('//ul[@class="links links-tags"]/li/a/text()')
+
+    return VideoClipObject(
+        title=title,
+        source_title='JavBuz',
+        tagline=tagline,
+        summary=summary,
+        duration=duration,
+        genres=genres,
+        tags=tags,
+        originally_available_at=Datetime.ParseDate(date),
+        year=int(Datetime.ParseDate(date).year),
+        content_rating='X',
+        thumb=thumb,
+        art=art)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+    mo = list()
+    fmt_list = list()
+    html = HTML.ElementFromURL(url, cacheTime=10)
+    for s in html.xpath('//video/source'):
+        if (s.get('type') == "video/mp4"):
+            fmt_list.append(s.get('data-res'))
+
+    if Prefs['force_tc']:
+        Log.Debug('* Force Transcoding ON')
+        for f in fmt_list:
+            mo.append(MediaObject(
+                parts=[PartObject(key=Callback(PlayVideo, url=url, fmt=f))],
+                video_resolution=f[:-1],
+                audio_channels=2,
+                optimized_for_streaming=False
+                ))
+    else:
+        Log.Debug('* Force Transcoding OFF')
+        for f in fmt_list:
+            mo.append(MediaObject(
+                parts=[PartObject(key=Callback(PlayVideo, url=url, fmt=f))],
+                video_resolution=f[:-1],
+                container=Container.MP4,
+                video_codec=VideoCodec.H264,
+                audio_codec=AudioCodec.AAC,
+                audio_channels=2,
+                optimized_for_streaming=True
+                ))
+    if mo:
+        return mo
+
+    raise Ex.MediaNotAvailable
+
+####################################################################################################
+@indirect
+def PlayVideo(url, fmt, **kwargs):
+    """Format the video url depending of version"""
+
+    html = HTML.ElementFromURL(url)
+    if html.xpath('//video'):
+        for s in html.xpath('//video/source'):
+            if (s.get('type') == "video/mp4") and (s.get('data-res') == fmt):
+                Log.Debug(u"* PlayVideo URL = {}".format(s.get('src')))
+                return IndirectResponse(VideoClipObject, key=s.get('src'))
+
+    raise Ex.MediaNotAvailable
